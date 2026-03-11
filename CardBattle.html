@@ -135,7 +135,7 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
   font-family:'Cinzel',serif;font-size:clamp(.58rem,.8vw,1rem);letter-spacing:.22em;
   color:var(--text2);text-align:center;padding:.2vh 0;
 }
-.hand{display:flex;flex-direction:column;gap:.8vh;flex:1;overflow:hidden}
+.hand{display:flex;flex-direction:column;gap:.6vh;flex:1;overflow:hidden;min-height:0}
 
 /* Cards in hand */
 .hcard{
@@ -153,9 +153,9 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
 .hcard.na{opacity:.35;cursor:not-allowed}
 .hcard.na:hover{transform:none;border-color:var(--border2);background:var(--panel2)}
 .hci{
-  width:100%;flex:1;min-height:0;
-  object-fit:cover;object-position:center;
-  image-rendering:pixelated;display:block;
+  width:100%;height:100%;
+  object-fit:contain;object-position:center;
+  image-rendering:pixelated;display:block;flex:1;min-height:0;
 }
 .hcfooter{
   display:flex;align-items:center;justify-content:space-between;
@@ -962,7 +962,7 @@ const POOL_TEMPLATE = [
   'AtkCard4',
   'DefCard1',
   'DefCard2',
-  'DefCard3','DefCard3',
+  'DefCard3',
   'SupCard1',
   'SupCard2',
   'SupCard3',
