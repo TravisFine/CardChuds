@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Card Battle</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.0.5/mqtt.min.js"></script>
 <style>
 :root {
   --bg:       #07090f;
@@ -677,18 +678,56 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
   <div class="statusbar" id="status">Welcome to Card Battle</div>
 </div>
 
-<script type="module">
-import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.20.2/torrent.js';
+<script>
 // ════════════════════════════════════════════════════
-//  NETWORK — Trystero P2P (WebTorrent signaling)
+//  NETWORK — MQTT over WebSockets (HiveMQ public broker)
+//  Works cross-network, no server setup, no accounts.
 // ════════════════════════════════════════════════════
-const NET = { active:false, isHost:false, myPid:0, room:null, sendMsg:null, rematchMe:false, rematchThem:false };
-const TRYSTERO_APP = { appId:'cardbattle-v1-rooms' };
+const MQTT_BROKER = 'wss://broker.hivemq.com:8884/mqtt';
+const NET = { active:false, isHost:false, myPid:0, client:null, sendTopic:null, rematchMe:false, rematchThem:false };
 
 function randCode(){
   const c='ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let s='';for(let i=0;i<5;i++) s+=c[Math.floor(Math.random()*c.length)];
+  let s=''; for(let i=0;i<5;i++) s+=c[Math.floor(Math.random()*c.length)];
   return s;
+}
+
+// ── MQTT setup ────────────────────────────────────
+function mqttConnect(code, isHost, onConnected){
+  const clientId = 'cb_'+(Date.now().toString(36))+'_'+(Math.random().toString(36).substr(2,6));
+  const sendTopic   = isHost ? `cb/${code}/h2g`       : `cb/${code}/g2h`;
+  const recvTopic   = isHost ? `cb/${code}/g2h`       : `cb/${code}/h2g`;
+  const myDiscTopic = isHost ? `cb/${code}/host-disc`  : `cb/${code}/guest-disc`;
+  const thDiscTopic = isHost ? `cb/${code}/guest-disc` : `cb/${code}/host-disc`;
+
+  // Clean up any prior connection
+  mqttDisconnect();
+
+  const client = mqtt.connect(MQTT_BROKER, {
+    clientId,
+    keepalive: 30,
+    reconnectPeriod: 0,   // no auto-reconnect — we handle it ourselves
+    will:{ topic:myDiscTopic, payload:'bye', qos:1, retain:false }
+  });
+
+  NET.client     = client;
+  NET.sendTopic  = sendTopic;
+
+  client.on('connect', ()=>{
+    client.subscribe([recvTopic, thDiscTopic], { qos:1 }, onConnected);
+  });
+
+  client.on('message', (topic, payload)=>{
+    if(topic === thDiscTopic){ netDisconnect(); return; }
+    try{ handleNetMsg(JSON.parse(payload.toString())); }catch(e){}
+  });
+
+  client.on('error', err=>console.warn('MQTT error:',err));
+}
+
+function mqttDisconnect(){
+  try{ if(NET.client){ NET.client.end(true); NET.client=null; } }catch(e){}
+  NET.sendTopic=null;
 }
 
 // ── Lobby navigation ──────────────────────────────
@@ -700,7 +739,7 @@ function showLobby(){
   document.getElementById('lobby-join-panel').style.display='none';
 }
 function lobbyBack(){
-  leaveRoom();
+  mqttDisconnect();
   document.getElementById('lobby-mode-select').style.display='flex';
   document.getElementById('lobby-host-panel').style.display='none';
   document.getElementById('lobby-join-panel').style.display='none';
@@ -708,34 +747,21 @@ function lobbyBack(){
   document.getElementById('lobby-join-status').textContent='';
   document.getElementById('btn-join-connect').disabled=false;
 }
-function leaveRoom(){
-  try{ if(NET.room){ NET.room.leave(); NET.room=null; } }catch(e){}
-  NET.sendMsg=null;
-}
 
 // ── Host ──────────────────────────────────────────
 function lobbyChooseHost(){
   document.getElementById('lobby-mode-select').style.display='none';
   document.getElementById('lobby-host-panel').style.display='flex';
-  const code=randCode();
+  const code = randCode();
   document.getElementById('host-code').textContent=code;
-  setLobbyHostStatus('Opening room…','dots');
+  setLobbyHostStatus('Connecting…','dots');
   NET.isHost=true; NET.myPid=0;
-  try{
-    NET.room=joinRoom(TRYSTERO_APP,'cbr-'+code);
-    const [send,receive]=NET.room.makeAction('game');
-    NET.sendMsg=send;
-    receive(data=>handleNetMsg(data));
-    NET.room.onPeerJoin(()=>{
-      setLobbyHostStatus('Opponent connected! Starting…','ok');
-      send({type:'welcome',myPid:1});
-      setTimeout(()=>launchOnlineGame(),900);
-    });
-    NET.room.onPeerLeave(()=>netDisconnect());
+
+  mqttConnect(code, true, err=>{
+    if(err){ setLobbyHostStatus('Connection failed — try again','err'); return; }
     setLobbyHostStatus('Waiting for opponent','dots');
-  }catch(e){
-    setLobbyHostStatus('Error: '+e.message,'err');
-  }
+    // Host waits; guest sends joinRequest to g2h which we receive
+  });
 }
 function copyCode(){
   const t=document.getElementById('host-code').textContent;
@@ -754,29 +780,26 @@ function lobbyChooseJoin(){
 }
 function lobbyConnect(){
   const code=document.getElementById('join-code-input').value.trim().toUpperCase();
-  if(code.length<2){setLobbyJoinStatus('Enter a valid code','err');return;}
-  setLobbyJoinStatus('Joining room…','');
+  if(code.length<2){ setLobbyJoinStatus('Enter a valid code','err'); return; }
+  setLobbyJoinStatus('Connecting…','');
   document.getElementById('btn-join-connect').disabled=true;
   NET.isHost=false; NET.myPid=1;
-  try{
-    NET.room=joinRoom(TRYSTERO_APP,'cbr-'+code);
-    const [send,receive]=NET.room.makeAction('game');
-    NET.sendMsg=send;
-    receive(data=>handleNetMsg(data));
-    NET.room.onPeerJoin(()=>setLobbyJoinStatus('Connected! Waiting for host…','ok'));
-    NET.room.onPeerLeave(()=>netDisconnect());
-    // Timeout if no host found
+
+  mqttConnect(code, false, err=>{
+    if(err){ setLobbyJoinStatus('Connection failed — try again','err');
+             document.getElementById('btn-join-connect').disabled=false; return; }
+    setLobbyJoinStatus('Connected — waiting for host…','ok');
+    // Announce presence to host
+    netSend({type:'joinRequest'});
+    // Timeout if host never responds
     setTimeout(()=>{
       if(!NET.active){
         setLobbyJoinStatus('No host found — check the code','err');
         document.getElementById('btn-join-connect').disabled=false;
-        leaveRoom();
+        mqttDisconnect();
       }
-    },18000);
-  }catch(e){
-    setLobbyJoinStatus('Failed: '+e.message,'err');
-    document.getElementById('btn-join-connect').disabled=false;
-  }
+    }, 20000);
+  });
 }
 function setLobbyJoinStatus(msg,cls){
   const el=document.getElementById('lobby-join-status');
@@ -786,11 +809,18 @@ function setLobbyJoinStatus(msg,cls){
 // ── Message handling ──────────────────────────────
 function handleNetMsg(msg){
   switch(msg.type){
-    case 'welcome': NET.myPid=msg.myPid; break;
-    case 'startGame': guestReceiveStart(msg.G); break;
-    case 'stateUpdate': guestApplyState(msg.G,msg.resolving,msg.status); break;
-    case 'vfx': playVfxEvent(msg.evt); break;
-    case 'gameOver': guestShowWin(msg.winner); break;
+    // Host receives joinRequest from guest → send welcome + start game
+    case 'joinRequest':
+      if(!NET.isHost) break;
+      setLobbyHostStatus('Opponent connected! Starting…','ok');
+      netSend({type:'welcome', myPid:1});
+      setTimeout(()=>launchOnlineGame(), 900);
+      break;
+    case 'welcome':     NET.myPid=msg.myPid; break;
+    case 'startGame':   guestReceiveStart(msg.G); break;
+    case 'stateUpdate': guestApplyState(msg.G, msg.resolving, msg.status); break;
+    case 'vfx':         playVfxEvent(msg.evt); break;
+    case 'gameOver':    guestShowWin(msg.winner); break;
     case 'rematchWant':
       NET.rematchThem=true;
       if(NET.rematchMe) doRematch();
@@ -798,18 +828,21 @@ function handleNetMsg(msg){
       break;
     case 'rematchDecline':
       setRematchStatus('Opponent left. Returning to menu…');
-      setTimeout(backToTitle,1800);
+      setTimeout(backToTitle, 1800);
       break;
     // Host receives these from guest:
-    case 'selectCard':  if(NET.isHost) selectCard(1,msg.idx); break;
-    case 'cellClick':   if(NET.isHost) cellClick(1,msg.row,msg.col,true); break;
-    case 'endTurn':     if(NET.isHost) endTurn(); break;
-    case 'cancelDelete':if(NET.isHost) cancelDelete(); break;
+    case 'selectCard':   if(NET.isHost) selectCard(1, msg.idx); break;
+    case 'cellClick':    if(NET.isHost) cellClick(1, msg.row, msg.col, true); break;
+    case 'endTurn':      if(NET.isHost) endTurn(); break;
+    case 'cancelDelete': if(NET.isHost) cancelDelete(); break;
   }
 }
 
 function netSend(msg){
-  try{ if(NET.sendMsg) NET.sendMsg(msg); }catch(e){}
+  try{
+    if(NET.client && NET.client.connected && NET.sendTopic)
+      NET.client.publish(NET.sendTopic, JSON.stringify(msg), {qos:1});
+  }catch(e){}
 }
 
 // Send a VFX event to the guest to play in real-time
@@ -1450,7 +1483,7 @@ function backToTitle(){
   document.getElementById('screen-title').style.display='';
   resolving=false; G=null;
   NET.active=false; NET.isHost=false; NET.myPid=0; NET.rematchMe=false; NET.rematchThem=false;
-  leaveRoom();
+  mqttDisconnect();
 }
 
 // ════════════════════════════════════════════════════
@@ -1863,15 +1896,6 @@ document.addEventListener('mousemove', e=>{
 window.addEventListener('DOMContentLoaded',()=>{
   initAudio();
   document.addEventListener('click', ()=>{ if(G) cancelDelete(); });
-});
-// ════════════════════════════════════════════════════
-//  EXPOSE FUNCTIONS FOR HTML onclick ATTRIBUTES
-//  (required because this is a JS module)
-// ════════════════════════════════════════════════════
-Object.assign(window, {
-  startGame, showLobby, backToTitle, endTurn,
-  lobbyChooseHost, lobbyChooseJoin, lobbyBack, lobbyConnect, copyCode,
-  requestRematch, cancelDelete,
 });
 </script>
 </body>
