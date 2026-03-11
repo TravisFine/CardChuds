@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Card Battle</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
 :root {
   --bg:       #07090f;
@@ -455,6 +456,91 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
 
 ::-webkit-scrollbar-track{background:var(--panel)}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ─── LOBBY SCREEN ───────────────────────────────────────────── */
+#screen-lobby{
+  position:fixed;inset:0;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:0;
+  background:radial-gradient(ellipse at 50% 38%,#131d3d 0%,#040610 65%);
+  z-index:300;
+}
+#screen-lobby.show{display:flex}
+.lobby-title{
+  font-family:'Cinzel Decorative',serif;font-size:clamp(1rem,2vw,1.5rem);
+  letter-spacing:.35em;color:var(--gold2);margin-bottom:38px;
+  text-shadow:0 0 30px rgba(201,162,39,.45);
+}
+.lobby-panel{
+  background:var(--panel);border:1px solid var(--border2);
+  padding:clamp(22px,3vh,38px) clamp(28px,4vw,52px);
+  display:flex;flex-direction:column;align-items:center;gap:18px;
+  min-width:320px;max-width:440px;width:90vw;
+  position:relative;
+}
+.lobby-panel::before{
+  content:'';position:absolute;inset:4px;
+  border:1px solid rgba(201,162,39,.08);pointer-events:none;
+}
+.lobby-panel-title{
+  font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.3em;
+  color:var(--text2);text-transform:uppercase;margin-bottom:4px;
+}
+.lobby-code-box{
+  font-family:'Cinzel Decorative',serif;font-size:clamp(2rem,5vw,3.2rem);
+  font-weight:700;letter-spacing:.25em;color:var(--gold2);
+  background:var(--panel2);border:1px solid var(--border2);
+  padding:12px 32px;text-align:center;
+  text-shadow:0 0 22px rgba(237,200,74,.5);
+  cursor:pointer;transition:all .15s;user-select:all;
+}
+.lobby-code-box:hover{border-color:var(--gold);box-shadow:0 0 14px rgba(201,162,39,.25)}
+.lobby-status{
+  font-family:'Cinzel',serif;font-size:.75rem;letter-spacing:.18em;
+  color:var(--text2);text-align:center;min-height:1.4em;
+}
+.lobby-status.ok{color:#4caf50}
+.lobby-status.err{color:var(--red)}
+.lobby-input{
+  font-family:'Cinzel',serif;font-size:1.3rem;letter-spacing:.35em;
+  color:var(--gold2);background:var(--panel2);border:1px solid var(--border2);
+  padding:10px 18px;text-align:center;text-transform:uppercase;
+  width:100%;outline:none;transition:border-color .15s;
+}
+.lobby-input:focus{border-color:var(--gold);box-shadow:0 0 12px rgba(201,162,39,.2)}
+.lobby-input::placeholder{color:var(--text2);font-size:.9rem;letter-spacing:.2em}
+.lobby-btn-row{display:flex;gap:14px;width:100%;justify-content:center;flex-wrap:wrap}
+.btn-sm{
+  font-family:'Cinzel',serif;font-size:.72rem;font-weight:700;letter-spacing:.2em;
+  color:#06080f;background:linear-gradient(135deg,#c9a227,#edd050);
+  border:none;padding:10px 28px;cursor:pointer;
+  clip-path:polygon(6px 0,calc(100% - 6px) 0,100% 6px,100% calc(100% - 6px),calc(100% - 6px) 100%,6px 100%,0 calc(100% - 6px),0 6px);
+  transition:all .15s;
+}
+.btn-sm:hover{filter:brightness(1.2);transform:scale(1.04)}
+.btn-sm:disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
+.btn-ghost{
+  font-family:'Cinzel',serif;font-size:.72rem;font-weight:700;letter-spacing:.2em;
+  color:var(--text2);background:transparent;
+  border:1px solid var(--border2);padding:10px 24px;cursor:pointer;
+  clip-path:polygon(6px 0,calc(100% - 6px) 0,100% 6px,100% calc(100% - 6px),calc(100% - 6px) 100%,6px 100%,0 calc(100% - 6px),0 6px);
+  transition:all .15s;
+}
+.btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+.copy-hint{font-size:.62rem;color:var(--text2);letter-spacing:.1em;opacity:.7}
+/* Waiting spinner dots */
+.dots::after{
+  content:'';animation:dots-anim 1.4s steps(4,end) infinite;
+}
+@keyframes dots-anim{
+  0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}100%{content:''}
+}
+/* Online badge in top bar */
+#online-badge{
+  font-family:'Cinzel',serif;font-size:.65rem;letter-spacing:.18em;
+  color:#4caf50;border:1px solid #4caf50;
+  padding:3px 10px;opacity:.8;display:none;
+}
+#online-badge.show{display:block}
 </style>
 </head>
 <body>
@@ -474,7 +560,47 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
 <div id="screen-title">
   <img id="title-img" src="assets/sprites/title.png" alt="Card Battle"
        onerror="this.style.opacity='.0'">
-  <button class="btn" onclick="startGame()">BEGIN</button>
+  <div style="display:flex;gap:18px;flex-wrap:wrap;justify-content:center">
+    <button class="btn" onclick="startGame()">LOCAL</button>
+    <button class="btn" onclick="showLobby()">ONLINE</button>
+  </div>
+</div>
+
+<!-- ═══ LOBBY SCREEN ═══ -->
+<div id="screen-lobby">
+  <div class="lobby-title">⚔ ONLINE BATTLE ⚔</div>
+
+  <!-- Mode select -->
+  <div class="lobby-panel" id="lobby-mode-select">
+    <div class="lobby-panel-title">Choose your role</div>
+    <div class="lobby-btn-row">
+      <button class="btn-sm" onclick="lobbyChooseHost()">HOST GAME</button>
+      <button class="btn-sm" onclick="lobbyChooseJoin()">JOIN GAME</button>
+    </div>
+    <button class="btn-ghost" onclick="backToTitle()">← BACK</button>
+  </div>
+
+  <!-- Host panel -->
+  <div class="lobby-panel" id="lobby-host-panel" style="display:none">
+    <div class="lobby-panel-title">Your room code</div>
+    <div class="lobby-code-box" id="host-code" title="Click to copy" onclick="copyCode()">-----</div>
+    <div class="copy-hint">Click code to copy · Share with your opponent</div>
+    <div class="lobby-status dots" id="lobby-host-status">Waiting for opponent</div>
+    <button class="btn-ghost" onclick="lobbyBack()">← BACK</button>
+  </div>
+
+  <!-- Join panel -->
+  <div class="lobby-panel" id="lobby-join-panel" style="display:none">
+    <div class="lobby-panel-title">Enter room code</div>
+    <input class="lobby-input" id="join-code-input" maxlength="5" placeholder="XXXXX"
+           oninput="this.value=this.value.toUpperCase()"
+           onkeydown="if(event.key==='Enter')lobbyConnect()">
+    <div class="lobby-btn-row">
+      <button class="btn-sm" id="btn-join-connect" onclick="lobbyConnect()">JOIN</button>
+    </div>
+    <div class="lobby-status" id="lobby-join-status"></div>
+    <button class="btn-ghost" onclick="lobbyBack()">← BACK</button>
+  </div>
 </div>
 
 <!-- ═══ WIN SCREEN ═══ -->
@@ -490,6 +616,7 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
   <div class="top-bar">
     <div id="turn-badge">PLAYER 1'S TURN</div>
     <button id="btn-end" onclick="endTurn()">END TURN</button>
+    <div id="online-badge">● ONLINE</div>
   </div>
 
   <!-- P1 side -->
@@ -540,6 +667,183 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
 </div>
 
 <script>
+// ════════════════════════════════════════════════════
+//  NETWORK — PeerJS multiplayer
+// ════════════════════════════════════════════════════
+const NET = { active:false, isHost:false, peer:null, conn:null, myPid:0 };
+
+function randCode(){
+  const c='ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let s='';for(let i=0;i<5;i++) s+=c[Math.floor(Math.random()*c.length)];
+  return s;
+}
+
+// ── Lobby navigation ──────────────────────────────
+function showLobby(){
+  document.getElementById('screen-title').style.display='none';
+  document.getElementById('screen-lobby').classList.add('show');
+  document.getElementById('lobby-mode-select').style.display='flex';
+  document.getElementById('lobby-host-panel').style.display='none';
+  document.getElementById('lobby-join-panel').style.display='none';
+}
+function lobbyBack(){
+  destroyPeer();
+  document.getElementById('lobby-mode-select').style.display='flex';
+  document.getElementById('lobby-host-panel').style.display='none';
+  document.getElementById('lobby-join-panel').style.display='none';
+  document.getElementById('join-code-input').value='';
+  document.getElementById('lobby-join-status').textContent='';
+  document.getElementById('btn-join-connect').disabled=false;
+}
+function destroyPeer(){
+  try{ if(NET.conn){ NET.conn.close(); NET.conn=null; } }catch(e){}
+  try{ if(NET.peer){ NET.peer.destroy(); NET.peer=null; } }catch(e){}
+}
+
+// ── Host ──────────────────────────────────────────
+function lobbyChooseHost(){
+  document.getElementById('lobby-mode-select').style.display='none';
+  document.getElementById('lobby-host-panel').style.display='flex';
+  const code=randCode();
+  document.getElementById('host-code').textContent=code;
+  setLobbyHostStatus('Waiting for opponent','dots');
+  NET.isHost=true; NET.myPid=0;
+  NET.peer=new Peer(code);
+  NET.peer.on('open',()=>{});
+  NET.peer.on('connection',conn=>{
+    NET.conn=conn;
+    conn.on('open',()=>{
+      setLobbyHostStatus('Opponent connected! Starting…','ok');
+      conn.send({type:'welcome',myPid:1});
+      setTimeout(()=>launchOnlineGame(),900);
+    });
+    conn.on('data',handleNetMsg);
+    conn.on('close',()=>netDisconnect());
+    conn.on('error',()=>netDisconnect());
+  });
+  NET.peer.on('error',err=>{
+    setLobbyHostStatus('Error: '+err.type,'err');
+  });
+}
+function copyCode(){
+  const t=document.getElementById('host-code').textContent;
+  navigator.clipboard&&navigator.clipboard.writeText(t).catch(()=>{});
+}
+function setLobbyHostStatus(msg,cls){
+  const el=document.getElementById('lobby-host-status');
+  el.textContent=msg;
+  el.className='lobby-status'+(cls?' '+cls:'');
+}
+
+// ── Guest ─────────────────────────────────────────
+function lobbyChooseJoin(){
+  document.getElementById('lobby-mode-select').style.display='none';
+  document.getElementById('lobby-join-panel').style.display='flex';
+  setTimeout(()=>document.getElementById('join-code-input').focus(),80);
+}
+function lobbyConnect(){
+  const code=document.getElementById('join-code-input').value.trim().toUpperCase();
+  if(code.length<2){ setLobbyJoinStatus('Enter a valid code','err'); return; }
+  setLobbyJoinStatus('Connecting…','');
+  document.getElementById('btn-join-connect').disabled=true;
+  NET.isHost=false; NET.myPid=1;
+  NET.peer=new Peer();
+  NET.peer.on('open',()=>{
+    NET.conn=NET.peer.connect(code,{reliable:true});
+    NET.conn.on('open',()=>setLobbyJoinStatus('Connected! Waiting for host…','ok'));
+    NET.conn.on('data',handleNetMsg);
+    NET.conn.on('close',()=>netDisconnect());
+    NET.conn.on('error',()=>netDisconnect());
+  });
+  NET.peer.on('error',err=>{
+    setLobbyJoinStatus('Failed — check the code','err');
+    document.getElementById('btn-join-connect').disabled=false;
+  });
+}
+function setLobbyJoinStatus(msg,cls){
+  const el=document.getElementById('lobby-join-status');
+  el.textContent=msg;
+  el.className='lobby-status'+(cls?' '+cls:'');
+}
+
+// ── Message handling ──────────────────────────────
+function handleNetMsg(msg){
+  switch(msg.type){
+    case 'welcome': NET.myPid=msg.myPid; break;
+    case 'startGame': guestReceiveStart(msg.G); break;
+    case 'stateUpdate': guestApplyState(msg.G, msg.resolving, msg.status); break;
+    case 'gameOver': break; // handled via stateUpdate
+    // Host receives these from guest:
+    case 'selectCard':
+      if(NET.isHost){ selectCard(1, msg.idx); } break;
+    case 'cellClick':
+      if(NET.isHost){ cellClick(1, msg.row, msg.col); } break;
+    case 'endTurn':
+      if(NET.isHost){ endTurn(); } break;
+    case 'cancelDelete':
+      if(NET.isHost){ cancelDelete(); } break;
+  }
+}
+
+function netSend(msg){
+  try{ if(NET.conn&&NET.conn.open) NET.conn.send(msg); }catch(e){}
+}
+
+// Host broadcasts full state to guest
+function netBroadcast(statusOverride){
+  if(!NET.active||!NET.isHost) return;
+  netSend({
+    type:'stateUpdate',
+    G: JSON.parse(JSON.stringify(G)),
+    resolving,
+    status: statusOverride||document.getElementById('status').textContent
+  });
+}
+
+// Guest receives authoritative state and re-renders
+function guestApplyState(newG, newResolving, status){
+  G=newG; resolving=newResolving;
+  if(status) setStatus(status);
+  renderAll();
+  // Guest can only act on their own turn
+  const myTurn = G.cp===NET.myPid && !resolving;
+  disableEnd(!myTurn);
+}
+
+// ── Game launch ───────────────────────────────────
+function launchOnlineGame(){
+  // Host initialises state and sends to guest
+  NET.active=true;
+  G=mkState();
+  G.players[0].pool=[...POOL_TEMPLATE];
+  G.players[1].pool=[...POOL_TEMPLATE];
+  G.players[0].hand=drawN(4,G.players[0].pool);
+  G.players[1].hand=drawN(4,G.players[1].pool);
+  document.getElementById('screen-lobby').classList.remove('show');
+  document.getElementById('screen-game').classList.add('show');
+  document.getElementById('online-badge').classList.add('show');
+  buildBoard(); renderAll(); playBgm();
+  setStatus("Player 1's turn (1st placement) — place cards, then End Turn");
+  disableEnd(false);
+  // Tell guest to start
+  netSend({type:'startGame', G:JSON.parse(JSON.stringify(G))});
+}
+
+function guestReceiveStart(initialG){
+  NET.active=true;
+  G=initialG; resolving=false;
+  document.getElementById('screen-lobby').classList.remove('show');
+  document.getElementById('screen-game').classList.add('show');
+  document.getElementById('online-badge').classList.add('show');
+  buildBoard(); renderAll(); playBgm();
+  setStatus("Player 1's turn (1st placement) — waiting…");
+  disableEnd(true);
+}
+
+function netDisconnect(){
+  if(G&&!G.winner) setStatus('⚠ Opponent disconnected.');
+}
+
 // ════════════════════════════════════════════════════
 //  CARD DEFINITIONS
 // ════════════════════════════════════════════════════
@@ -703,8 +1007,8 @@ async function resolveBoard(){
   resolving = true;
   setStatus('Resolving board...');
   disableEnd(true);
+  netBroadcast('Resolving board...');
 
-  // Acting player goes first, then opponent — each side resolves row by row, left col then right col
   const actingFirst = G.cp;
   const order = [actingFirst, 1-actingFirst];
 
@@ -718,13 +1022,13 @@ async function resolveBoard(){
         await actUnit(u, pid, row, c);
         cleanDead();
         renderBoard(); renderStats();
+        netBroadcast();
         if(checkWin()) return;
         await sleep(180);
       }
     }
   }
 
-  // Post-resolve: increment all unit resolved counters, expire walls
   for(let pid=0;pid<2;pid++)
     for(let r=0;r<3;r++)
       for(let c=0;c<2;c++){
@@ -737,6 +1041,7 @@ async function resolveBoard(){
   cleanDead();
   renderAll();
   resolving = false;
+  netBroadcast();
 
   if(!checkWin()) switchPlayer();
 }
@@ -834,6 +1139,10 @@ async function actUnit(u, pid, row, col){
 // ════════════════════════════════════════════════════
 function endTurn(){
   if(resolving) return;
+  // Online: guest sends request to host; only host actually runs game logic
+  if(NET.active&&!NET.isHost){ netSend({type:'endTurn'}); return; }
+  // Online: host must not end turn when it's the guest's turn
+  if(NET.active&&NET.isHost&&G.cp!==NET.myPid&&G.placementPhase===0&&G.roundStarter!==NET.myPid) {/* allow*/}
   const p = G.players[G.cp];
   p.mp = Math.min(p.mmp, p.mp + 3);
   p.bonus = 0;
@@ -841,32 +1150,36 @@ function endTurn(){
   renderAll();
 
   if(G.placementPhase === 0){
-    // First placer done — hand off to second placer, no resolve yet
     G.placementPhase = 1;
     switchPlayer();
   } else {
-    // Both players have placed — resolve then start next round
     G.placementPhase = 0;
-    G.roundStarter = 1 - G.roundStarter; // alternate who opens next round
+    G.roundStarter = 1 - G.roundStarter;
     resolveBoard();
   }
 }
 
 function switchPlayer(){
-  // If placementPhase is 1 we're handing to the second placer (opposite of roundStarter)
-  // If placementPhase is 0 we just came out of resolve, go to next roundStarter
   G.cp = G.placementPhase === 1 ? 1 - G.roundStarter : G.roundStarter;
   G.sel = null;
-  // Replenish incoming player's hand — after resolve dead cards are back in their pool
   const p = G.players[G.cp];
   const need = 4 - p.hand.length + (p.bonus||0);
   if(need > 0) p.hand.push(...drawN(need, p.pool));
   p.bonus = 0;
   const pn = G.cp===0?'Player 1':'Player 2';
   const phase = G.placementPhase === 1 ? '(2nd placement)' : '(1st placement)';
-  setStatus(`${pn}'s turn ${phase} — place cards, then click End Turn`);
+  const statusMsg = `${pn}'s turn ${phase} — place cards, then click End Turn`;
+  setStatus(statusMsg);
   renderAll();
-  disableEnd(false);
+
+  if(NET.active){
+    // In online: only enable End Turn for the player whose turn it is
+    const myTurn = G.cp===NET.myPid;
+    disableEnd(!myTurn);
+    netBroadcast(statusMsg);
+  } else {
+    disableEnd(false);
+  }
 }
 
 // ════════════════════════════════════════════════════
@@ -874,11 +1187,16 @@ function switchPlayer(){
 // ════════════════════════════════════════════════════
 function selectCard(pid, idx){
   if(resolving||G.cp!==pid) return;
+  // Guest: send to host
+  if(NET.active&&!NET.isHost&&pid===NET.myPid){
+    netSend({type:'selectCard',idx}); return;
+  }
   const ct = G.players[pid].hand[idx];
   if(G.players[pid].mp < DEFS[ct].mana) return;
   G.sel = G.sel===idx ? null : idx;
   if(G.sel!==null) playSfx('select');
   renderHands(); renderBoard();
+  netBroadcast();
 }
 
 function placeCard(pid, row, col){
@@ -894,42 +1212,50 @@ function placeCard(pid, row, col){
   playSfx('place');
   flashPop(pid,row,col);
   renderAll();
+  netBroadcast();
 }
 
 function cellClick(pid, row, col){
   if(resolving) return;
+  // Guest: send to host (only for their own side)
+  if(NET.active&&!NET.isHost&&pid===NET.myPid){
+    netSend({type:'cellClick',row,col}); return;
+  }
+  // In online mode, prevent host from clicking guest's side
+  if(NET.active&&NET.isHost&&pid!==NET.myPid) return;
 
   const u = G.board[pid][row][col];
   const dt = G.deleteTarget;
 
-  // ── Second click on same pending-delete unit → confirm delete
   if(dt && dt.pid===pid && dt.row===row && dt.col===col){
     G.players[u.owner].pool.push(u.type);
     G.board[pid][row][col] = null;
     G.deleteTarget = null;
     playSfx('hit_unit');
     renderBoard();
+    netBroadcast();
     return;
   }
 
-  // ── Click on an occupied cell belonging to current player → start delete
   if(u && u.owner === G.cp){
-    cancelDelete();          // clear any previous pending
+    cancelDelete();
     G.deleteTarget = {pid, row, col};
     playSfx('select');
     renderBoard();
+    netBroadcast();
     return;
   }
 
-  // ── Empty cell — attempt placement (also clears any pending delete)
   cancelDelete();
   placeCard(pid, row, col);
 }
 
 function cancelDelete(){
   if(!G || !G.deleteTarget) return;
+  if(NET.active&&!NET.isHost){ netSend({type:'cancelDelete'}); return; }
   G.deleteTarget = null;
   renderBoard();
+  netBroadcast();
 }
 function checkWin(){
   let dead=-1;
@@ -979,8 +1305,13 @@ function backToTitle(){
   stopBgm();
   document.getElementById('screen-win').classList.remove('show');
   document.getElementById('screen-game').classList.remove('show');
+  document.getElementById('screen-lobby').classList.remove('show');
+  document.getElementById('online-badge').classList.remove('show');
   document.getElementById('screen-title').style.display='';
   resolving=false; G=null;
+  // Clean up network
+  NET.active=false; NET.isHost=false; NET.myPid=0;
+  destroyPeer();
 }
 
 // ════════════════════════════════════════════════════
@@ -1035,7 +1366,9 @@ function renderHands(){
     const hEl=document.getElementById(`hand-p${pid+1}`);
     hEl.innerHTML='';
     const p=G.players[pid];
-    const active=G.cp===pid&&!resolving;
+    // In online mode, only your own hand is interactive
+    const onlineBlock = NET.active && pid!==NET.myPid;
+    const active=G.cp===pid&&!resolving&&!onlineBlock;
     p.hand.forEach((ct,i)=>{
       const d=DEFS[ct];
       const cantAfford=p.mp<d.mana;
