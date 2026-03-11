@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Card Battle</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
 :root {
   --bg:       #07090f;
@@ -678,11 +677,13 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
   <div class="statusbar" id="status">Welcome to Card Battle</div>
 </div>
 
-<script>
+<script type="module">
+import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.20.2/torrent.js';
 // ════════════════════════════════════════════════════
-//  NETWORK — PeerJS multiplayer
+//  NETWORK — Trystero P2P (WebTorrent signaling)
 // ════════════════════════════════════════════════════
-const NET = { active:false, isHost:false, peer:null, conn:null, myPid:0, rematchMe:false, rematchThem:false };
+const NET = { active:false, isHost:false, myPid:0, room:null, sendMsg:null, rematchMe:false, rematchThem:false };
+const TRYSTERO_APP = { appId:'cardbattle-v1-rooms' };
 
 function randCode(){
   const c='ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -699,7 +700,7 @@ function showLobby(){
   document.getElementById('lobby-join-panel').style.display='none';
 }
 function lobbyBack(){
-  destroyPeer();
+  leaveRoom();
   document.getElementById('lobby-mode-select').style.display='flex';
   document.getElementById('lobby-host-panel').style.display='none';
   document.getElementById('lobby-join-panel').style.display='none';
@@ -707,9 +708,9 @@ function lobbyBack(){
   document.getElementById('lobby-join-status').textContent='';
   document.getElementById('btn-join-connect').disabled=false;
 }
-function destroyPeer(){
-  try{ if(NET.conn){ NET.conn.close(); NET.conn=null; } }catch(e){}
-  try{ if(NET.peer){ NET.peer.destroy(); NET.peer=null; } }catch(e){}
+function leaveRoom(){
+  try{ if(NET.room){ NET.room.leave(); NET.room=null; } }catch(e){}
+  NET.sendMsg=null;
 }
 
 // ── Host ──────────────────────────────────────────
@@ -718,24 +719,23 @@ function lobbyChooseHost(){
   document.getElementById('lobby-host-panel').style.display='flex';
   const code=randCode();
   document.getElementById('host-code').textContent=code;
-  setLobbyHostStatus('Waiting for opponent','dots');
+  setLobbyHostStatus('Opening room…','dots');
   NET.isHost=true; NET.myPid=0;
-  NET.peer=new Peer(code);
-  NET.peer.on('open',()=>{});
-  NET.peer.on('connection',conn=>{
-    NET.conn=conn;
-    conn.on('open',()=>{
+  try{
+    NET.room=joinRoom(TRYSTERO_APP,'cbr-'+code);
+    const [send,receive]=NET.room.makeAction('game');
+    NET.sendMsg=send;
+    receive(data=>handleNetMsg(data));
+    NET.room.onPeerJoin(()=>{
       setLobbyHostStatus('Opponent connected! Starting…','ok');
-      conn.send({type:'welcome',myPid:1});
+      send({type:'welcome',myPid:1});
       setTimeout(()=>launchOnlineGame(),900);
     });
-    conn.on('data',handleNetMsg);
-    conn.on('close',()=>netDisconnect());
-    conn.on('error',()=>netDisconnect());
-  });
-  NET.peer.on('error',err=>{
-    setLobbyHostStatus('Error: '+err.type,'err');
-  });
+    NET.room.onPeerLeave(()=>netDisconnect());
+    setLobbyHostStatus('Waiting for opponent','dots');
+  }catch(e){
+    setLobbyHostStatus('Error: '+e.message,'err');
+  }
 }
 function copyCode(){
   const t=document.getElementById('host-code').textContent;
@@ -743,8 +743,7 @@ function copyCode(){
 }
 function setLobbyHostStatus(msg,cls){
   const el=document.getElementById('lobby-host-status');
-  el.textContent=msg;
-  el.className='lobby-status'+(cls?' '+cls:'');
+  el.textContent=msg; el.className='lobby-status'+(cls?' '+cls:'');
 }
 
 // ── Guest ─────────────────────────────────────────
@@ -755,27 +754,33 @@ function lobbyChooseJoin(){
 }
 function lobbyConnect(){
   const code=document.getElementById('join-code-input').value.trim().toUpperCase();
-  if(code.length<2){ setLobbyJoinStatus('Enter a valid code','err'); return; }
-  setLobbyJoinStatus('Connecting…','');
+  if(code.length<2){setLobbyJoinStatus('Enter a valid code','err');return;}
+  setLobbyJoinStatus('Joining room…','');
   document.getElementById('btn-join-connect').disabled=true;
   NET.isHost=false; NET.myPid=1;
-  NET.peer=new Peer();
-  NET.peer.on('open',()=>{
-    NET.conn=NET.peer.connect(code,{reliable:true});
-    NET.conn.on('open',()=>setLobbyJoinStatus('Connected! Waiting for host…','ok'));
-    NET.conn.on('data',handleNetMsg);
-    NET.conn.on('close',()=>netDisconnect());
-    NET.conn.on('error',()=>netDisconnect());
-  });
-  NET.peer.on('error',err=>{
-    setLobbyJoinStatus('Failed — check the code','err');
+  try{
+    NET.room=joinRoom(TRYSTERO_APP,'cbr-'+code);
+    const [send,receive]=NET.room.makeAction('game');
+    NET.sendMsg=send;
+    receive(data=>handleNetMsg(data));
+    NET.room.onPeerJoin(()=>setLobbyJoinStatus('Connected! Waiting for host…','ok'));
+    NET.room.onPeerLeave(()=>netDisconnect());
+    // Timeout if no host found
+    setTimeout(()=>{
+      if(!NET.active){
+        setLobbyJoinStatus('No host found — check the code','err');
+        document.getElementById('btn-join-connect').disabled=false;
+        leaveRoom();
+      }
+    },18000);
+  }catch(e){
+    setLobbyJoinStatus('Failed: '+e.message,'err');
     document.getElementById('btn-join-connect').disabled=false;
-  });
+  }
 }
 function setLobbyJoinStatus(msg,cls){
   const el=document.getElementById('lobby-join-status');
-  el.textContent=msg;
-  el.className='lobby-status'+(cls?' '+cls:'');
+  el.textContent=msg; el.className='lobby-status'+(cls?' '+cls:'');
 }
 
 // ── Message handling ──────────────────────────────
@@ -783,32 +788,28 @@ function handleNetMsg(msg){
   switch(msg.type){
     case 'welcome': NET.myPid=msg.myPid; break;
     case 'startGame': guestReceiveStart(msg.G); break;
-    case 'stateUpdate': guestApplyState(msg.G, msg.resolving, msg.status); break;
+    case 'stateUpdate': guestApplyState(msg.G,msg.resolving,msg.status); break;
     case 'vfx': playVfxEvent(msg.evt); break;
     case 'gameOver': guestShowWin(msg.winner); break;
     case 'rematchWant':
-      NET.rematchThem = true;
+      NET.rematchThem=true;
       if(NET.rematchMe) doRematch();
       else setRematchStatus('Opponent wants a rematch!');
       break;
     case 'rematchDecline':
       setRematchStatus('Opponent left. Returning to menu…');
-      setTimeout(backToTitle, 1800);
+      setTimeout(backToTitle,1800);
       break;
     // Host receives these from guest:
-    case 'selectCard':
-      if(NET.isHost){ selectCard(1, msg.idx); } break;
-    case 'cellClick':
-      if(NET.isHost){ cellClick(1, msg.row, msg.col, true); } break;
-    case 'endTurn':
-      if(NET.isHost){ endTurn(); } break;
-    case 'cancelDelete':
-      if(NET.isHost){ cancelDelete(); } break;
+    case 'selectCard':  if(NET.isHost) selectCard(1,msg.idx); break;
+    case 'cellClick':   if(NET.isHost) cellClick(1,msg.row,msg.col,true); break;
+    case 'endTurn':     if(NET.isHost) endTurn(); break;
+    case 'cancelDelete':if(NET.isHost) cancelDelete(); break;
   }
 }
 
 function netSend(msg){
-  try{ if(NET.conn&&NET.conn.open) NET.conn.send(msg); }catch(e){}
+  try{ if(NET.sendMsg) NET.sendMsg(msg); }catch(e){}
 }
 
 // Send a VFX event to the guest to play in real-time
@@ -1449,7 +1450,7 @@ function backToTitle(){
   document.getElementById('screen-title').style.display='';
   resolving=false; G=null;
   NET.active=false; NET.isHost=false; NET.myPid=0; NET.rematchMe=false; NET.rematchThem=false;
-  destroyPeer();
+  leaveRoom();
 }
 
 // ════════════════════════════════════════════════════
@@ -1862,6 +1863,15 @@ document.addEventListener('mousemove', e=>{
 window.addEventListener('DOMContentLoaded',()=>{
   initAudio();
   document.addEventListener('click', ()=>{ if(G) cancelDelete(); });
+});
+// ════════════════════════════════════════════════════
+//  EXPOSE FUNCTIONS FOR HTML onclick ATTRIBUTES
+//  (required because this is a JS module)
+// ════════════════════════════════════════════════════
+Object.assign(window, {
+  startGame, showLobby, backToTitle, endTurn,
+  lobbyChooseHost, lobbyChooseJoin, lobbyBack, lobbyConnect, copyCode,
+  requestRematch, cancelDelete,
 });
 </script>
 </body>
