@@ -607,7 +607,19 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
 <div id="screen-win">
   <div id="win-heading"></div>
   <div id="win-sub"></div>
-  <button class="btn" onclick="backToTitle()">PLAY AGAIN</button>
+  <!-- Local play buttons -->
+  <div id="win-local-btns">
+    <button class="btn" onclick="startGame()">PLAY AGAIN</button>
+    <button class="btn" style="margin-left:14px" onclick="backToTitle()">MAIN MENU</button>
+  </div>
+  <!-- Online play buttons -->
+  <div id="win-online-btns" style="display:none;flex-direction:column;align-items:center;gap:16px">
+    <div class="lobby-btn-row">
+      <button class="btn-sm" id="btn-rematch" onclick="requestRematch()">REMATCH</button>
+      <button class="btn-sm" onclick="backToTitle()">MAIN MENU</button>
+    </div>
+    <div class="lobby-status" id="rematch-status"></div>
+  </div>
 </div>
 
 <!-- ═══ GAME SCREEN ═══ -->
@@ -670,7 +682,7 @@ html,body{width:100vw;height:100vh;overflow:hidden;background:var(--bg);color:va
 // ════════════════════════════════════════════════════
 //  NETWORK — PeerJS multiplayer
 // ════════════════════════════════════════════════════
-const NET = { active:false, isHost:false, peer:null, conn:null, myPid:0 };
+const NET = { active:false, isHost:false, peer:null, conn:null, myPid:0, rematchMe:false, rematchThem:false };
 
 function randCode(){
   const c='ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -772,12 +784,22 @@ function handleNetMsg(msg){
     case 'welcome': NET.myPid=msg.myPid; break;
     case 'startGame': guestReceiveStart(msg.G); break;
     case 'stateUpdate': guestApplyState(msg.G, msg.resolving, msg.status); break;
-    case 'gameOver': break; // handled via stateUpdate
+    case 'vfx': playVfxEvent(msg.evt); break;
+    case 'gameOver': guestShowWin(msg.winner); break;
+    case 'rematchWant':
+      NET.rematchThem = true;
+      if(NET.rematchMe) doRematch();
+      else setRematchStatus('Opponent wants a rematch!');
+      break;
+    case 'rematchDecline':
+      setRematchStatus('Opponent left. Returning to menu…');
+      setTimeout(backToTitle, 1800);
+      break;
     // Host receives these from guest:
     case 'selectCard':
       if(NET.isHost){ selectCard(1, msg.idx); } break;
     case 'cellClick':
-      if(NET.isHost){ cellClick(1, msg.row, msg.col); } break;
+      if(NET.isHost){ cellClick(1, msg.row, msg.col, true); } break;
     case 'endTurn':
       if(NET.isHost){ endTurn(); } break;
     case 'cancelDelete':
@@ -787,6 +809,32 @@ function handleNetMsg(msg){
 
 function netSend(msg){
   try{ if(NET.conn&&NET.conn.open) NET.conn.send(msg); }catch(e){}
+}
+
+// Send a VFX event to the guest to play in real-time
+function netVfx(evt){
+  if(!NET.active||!NET.isHost) return;
+  netSend({type:'vfx', evt});
+}
+
+// Execute a VFX event descriptor (used by guest on receipt, or locally for shared helpers)
+async function playVfxEvent(e){
+  switch(e.t){
+    case 'flashAct':   flashAct(e.pid,e.row,e.col); break;
+    case 'flashCell':  flashCell(e.pid,e.row,e.col); break;
+    case 'flashRow':   flashRow(e.row); break;
+    case 'flashHp':    flashHp(e.pid); break;
+    case 'flashPop':   flashPop(e.pid,e.row,e.col); break;
+    case 'basicHit':   vfxBasicHit(e.pid,e.row,e.col); break;
+    case 'playerHit':  vfxPlayerHit(e.pid); break;
+    case 'laser':      vfxLaser(e.pid,e.row,e.col); break;
+    case 'laserHit':   vfxLaserHit(e.pid,e.row,e.col); break;
+    case 'arch':       vfxArch(e.pid,e.row,e.col); break; // fire-and-forget on guest
+    case 'boost':      vfxBoost(e.pid); break;
+    case 'curse':      vfxCurse(e.opp); break;
+    case 'heal':       vfxHeal(e.pid,e.row,e.col); break;
+    case 'sfx':        playSfx(e.name); break;
+  }
 }
 
 // Host broadcasts full state to guest
@@ -812,36 +860,49 @@ function guestApplyState(newG, newResolving, status){
 
 // ── Game launch ───────────────────────────────────
 function launchOnlineGame(){
-  // Host initialises state and sends to guest
   NET.active=true;
+  resolving = false;
   G=mkState();
   G.players[0].pool=[...POOL_TEMPLATE];
   G.players[1].pool=[...POOL_TEMPLATE];
   G.players[0].hand=drawN(4,G.players[0].pool);
   G.players[1].hand=drawN(4,G.players[1].pool);
+  document.getElementById('screen-win').classList.remove('show');
   document.getElementById('screen-lobby').classList.remove('show');
   document.getElementById('screen-game').classList.add('show');
   document.getElementById('online-badge').classList.add('show');
   buildBoard(); renderAll(); playBgm();
-  setStatus("Player 1's turn (1st placement) — place cards, then End Turn");
-  disableEnd(false);
-  // Tell guest to start
+  const firstPn = G.cp===0 ? 'Player 1' : 'Player 2';
+  const statusMsg = `${firstPn}'s turn (1st placement) — place cards, then End Turn`;
+  setStatus(statusMsg);
+  disableEnd(G.cp !== NET.myPid);
   netSend({type:'startGame', G:JSON.parse(JSON.stringify(G))});
 }
 
 function guestReceiveStart(initialG){
   NET.active=true;
   G=initialG; resolving=false;
+  document.getElementById('screen-win').classList.remove('show');
   document.getElementById('screen-lobby').classList.remove('show');
   document.getElementById('screen-game').classList.add('show');
   document.getElementById('online-badge').classList.add('show');
   buildBoard(); renderAll(); playBgm();
-  setStatus("Player 1's turn (1st placement) — waiting…");
-  disableEnd(true);
+  const myTurn = G.cp === NET.myPid;
+  const firstPn = G.cp===0 ? 'Player 1' : 'Player 2';
+  setStatus(myTurn
+    ? `${firstPn}'s turn (1st placement) — place cards, then End Turn`
+    : `${firstPn}'s turn (1st placement) — waiting…`);
+  disableEnd(!myTurn);
 }
 
 function netDisconnect(){
-  if(G&&!G.winner) setStatus('⚠ Opponent disconnected.');
+  if(G && G.winner !== null && G.winner !== undefined){
+    // Already on win screen — opponent left queue
+    setRematchStatus('Opponent disconnected. Returning to menu…');
+    setTimeout(backToTitle, 1800);
+  } else if(G) {
+    setStatus('⚠ Opponent disconnected.');
+  }
 }
 
 // ════════════════════════════════════════════════════
@@ -900,21 +961,19 @@ let G = null;
 let resolving = false;
 
 function mkState(){
+  const first = Math.random()<0.5 ? 0 : 1;
   return {
-    cp: 0, // current player (0=P1,1=P2)
+    cp: first,
     players:[
       {hp:12,mhp:12,mp:5,mmp:5,hand:[],pool:[],bonus:0},
       {hp:12,mhp:12,mp:5,mmp:5,hand:[],pool:[],bonus:0},
     ],
-    // board[pid][row][col], col0=back/front depends on side (see notes)
-    // P1: col0=back, col1=front(closer to divider)
-    // P2: col0=front(closer to divider), col1=back
     board:[ [[null,null],[null,null],[null,null]], [[null,null],[null,null],[null,null]] ],
     sel:null,
-    deleteTarget: null, // {pid,row,col} of unit pending deletion
+    deleteTarget: null,
     winner:null,
-    roundStarter: 0,    // who opens each round; flips after every resolve
-    placementPhase: 0,  // 0 = first placer's turn, 1 = second placer's turn
+    roundStarter: first,
+    placementPhase: 0,
   };
 }
 
@@ -989,6 +1048,7 @@ function triggerExplode(row){
       if(u){ G.players[u.owner].pool.push(u.type); G.board[pid][row][c]=null; }
     }
   flashRow(row);
+  netVfx({t:'flashRow',row});
 }
 
 function cleanDead(){
@@ -1018,6 +1078,7 @@ async function resolveBoard(){
         const u = G.board[pid][row][c];
         if(!u||u.dead) continue;
         flashAct(pid,row,c);
+        netVfx({t:'flashAct',pid,row,col:c});
         await sleep(160);
         await actUnit(u, pid, row, c);
         cleanDead();
@@ -1058,11 +1119,17 @@ async function actUnit(u, pid, row, col){
       if(tgts.length){
         await sleep(80);
         vfxBasicHit(opp,tgts[0].r,tgts[0].c);
+        netVfx({t:'basicHit',pid:opp,row:tgts[0].r,col:tgts[0].c});
         await sleep(80);
         dmgUnit(opp,tgts[0].r,tgts[0].c,atk,u);
+        netVfx({t:'flashCell',pid:opp,row:tgts[0].r,col:tgts[0].c});
+        netVfx({t:'sfx',name:'hit_unit'});
       } else {
         await sleep(80);
         vfxPlayerHit(opp);
+        netVfx({t:'playerHit',pid:opp});
+        netVfx({t:'flashHp',pid:opp});
+        netVfx({t:'sfx',name:'hit_player'});
         G.players[opp].hp = Math.max(0,G.players[opp].hp-atk);
         playSfx('hit_player');
         flashHp(opp);
@@ -1072,16 +1139,21 @@ async function actUnit(u, pid, row, col){
     case 'arch':{
       if(atk<=0) break;
       playSfx('lob');
+      netVfx({t:'sfx',name:'lob'});
       setStatus(`Mage launches an arching bolt at Player ${opp+1}!`);
+      netVfx({t:'arch',pid,row,col});
       await vfxArch(pid,row,col);
       G.players[opp].hp = Math.max(0,G.players[opp].hp-atk);
       playSfx('hit_player');
       flashHp(opp);
+      netVfx({t:'flashHp',pid:opp});
+      netVfx({t:'sfx',name:'hit_player'});
       break;
     }
     case 'pierce':{
       if(atk<=0) break;
       vfxLaser(pid,row,col);
+      netVfx({t:'laser',pid,row,col});
       await sleep(140);
       const tgts = getTargets(opp,row);
       let hits=0;
@@ -1092,7 +1164,10 @@ async function actUnit(u, pid, row, col){
         if(tu){
           await sleep(100);
           vfxLaserHit(opp,t.r,t.c);
+          netVfx({t:'laserHit',pid:opp,row:t.r,col:t.c});
           dmgUnit(opp,t.r,t.c,eff,u);
+          netVfx({t:'flashCell',pid:opp,row:t.r,col:t.c});
+          netVfx({t:'sfx',name:'hit_unit'});
           hits++;
           renderBoard();
           await sleep(90);
@@ -1102,6 +1177,9 @@ async function actUnit(u, pid, row, col){
       if(rem>0){
         await sleep(90);
         vfxPlayerHit(opp);
+        netVfx({t:'playerHit',pid:opp});
+        netVfx({t:'flashHp',pid:opp});
+        netVfx({t:'sfx',name:'hit_player'});
         G.players[opp].hp = Math.max(0,G.players[opp].hp-rem);
         playSfx('hit_player');
         flashHp(opp);
@@ -1113,15 +1191,18 @@ async function actUnit(u, pid, row, col){
     case 'explode':break; // only triggers on death
     case 'boost':{
       setStatus(`Coach rallies the troops! All allies gain +1 attack!`);
+      netVfx({t:'boost',pid});
       await vfxBoost(pid);
       break;
     }
     case 'curse':{
       setStatus(`Malice weakens the enemy! All foes suffer -1 attack!`);
+      netVfx({t:'curse',opp});
       await vfxCurse(opp);
       break;
     }
     case 'heal':{
+      netVfx({t:'heal',pid,row,col});
       await vfxHeal(pid,row,col);
       G.players[pid].hp = Math.min(G.players[pid].mhp,G.players[pid].hp+1);
       setStatus(`Healer restores 1 HP for Player ${pid+1}!`);
@@ -1211,18 +1292,20 @@ function placeCard(pid, row, col){
   G.sel = null;
   playSfx('place');
   flashPop(pid,row,col);
+  netVfx({t:'flashPop',pid,row,col});
+  netVfx({t:'sfx',name:'place'});
   renderAll();
   netBroadcast();
 }
 
-function cellClick(pid, row, col){
+function cellClick(pid, row, col, _proxy=false){
   if(resolving) return;
   // Guest: send to host (only for their own side)
   if(NET.active&&!NET.isHost&&pid===NET.myPid){
     netSend({type:'cellClick',row,col}); return;
   }
-  // In online mode, prevent host from clicking guest's side
-  if(NET.active&&NET.isHost&&pid!==NET.myPid) return;
+  // In online mode, prevent host from manually clicking guest's side (but allow proxied actions)
+  if(NET.active&&NET.isHost&&pid!==NET.myPid&&!_proxy) return;
 
   const u = G.board[pid][row][col];
   const dt = G.deleteTarget;
@@ -1264,29 +1347,83 @@ function checkWin(){
   if(dead===-1) return false;
   const winner = 1-dead;
   G.winner = winner;
+  resolving = false; // always clear so rematch starts unblocked
   stopBgm();
-  playSfx(winner===0?'win':'lose');
-  setTimeout(()=>showWin(winner),700);
+  if(NET.active && NET.isHost){
+    netSend({type:'gameOver', winner});
+  }
+  const iWon = NET.active ? winner===NET.myPid : winner===0;
+  playSfx(iWon ? 'win' : 'lose');
+  setTimeout(()=>showWin(winner), 700);
   return true;
+}
+
+function guestShowWin(winner){
+  G = G||{}; G.winner = winner;
+  stopBgm();
+  const iWon = winner === NET.myPid;
+  playSfx(iWon ? 'win' : 'lose');
+  setTimeout(()=>showWin(winner), 700);
 }
 
 function showWin(winner){
   const h = document.getElementById('win-heading');
   const s = document.getElementById('win-sub');
-  if(winner===0){
-    h.textContent='VICTORY'; h.style.color='var(--gold2)';
-    s.textContent='Player 1 reigns victorious';
+  const localBtns = document.getElementById('win-local-btns');
+  const onlineBtns = document.getElementById('win-online-btns');
+
+  if(NET.active){
+    // Perspective-aware: each player sees their own outcome
+    const iWon = winner === NET.myPid;
+    h.textContent = iWon ? 'VICTORY' : 'DEFEAT';
+    h.style.color = iWon ? 'var(--gold2)' : 'var(--p2col)';
+    s.textContent = iWon ? 'You reign victorious!' : 'You have been defeated.';
+    localBtns.style.display = 'none';
+    onlineBtns.style.display = 'flex';
+    NET.rematchMe = false; NET.rematchThem = false;
+    setRematchStatus('');
+    document.getElementById('btn-rematch').disabled = false;
+    document.getElementById('btn-rematch').textContent = 'REMATCH';
   } else {
-    h.textContent='DEFEAT'; h.style.color='var(--p2col)';
-    s.textContent='Player 2 claims the field';
+    // Local: classic text
+    if(winner===0){
+      h.textContent='VICTORY'; h.style.color='var(--gold2)';
+      s.textContent='Player 1 reigns victorious';
+    } else {
+      h.textContent='DEFEAT'; h.style.color='var(--p2col)';
+      s.textContent='Player 2 claims the field';
+    }
+    localBtns.style.display = 'block';
+    onlineBtns.style.display = 'none';
   }
   document.getElementById('screen-win').classList.add('show');
 }
 
-// ════════════════════════════════════════════════════
-//  INIT / RESTART
-// ════════════════════════════════════════════════════
+function setRematchStatus(msg, cls){
+  const el = document.getElementById('rematch-status');
+  if(el){ el.textContent = msg; el.className = 'lobby-status'+(cls?' '+cls:''); }
+}
+
+function requestRematch(){
+  NET.rematchMe = true;
+  document.getElementById('btn-rematch').disabled = true;
+  document.getElementById('btn-rematch').textContent = 'WAITING…';
+  netSend({type:'rematchWant'});
+  setRematchStatus('Waiting for opponent…');
+  if(NET.rematchThem) doRematch();
+}
+
+function doRematch(){
+  // Both sides want rematch — only host actually restarts, guest waits for startGame
+  document.getElementById('screen-win').classList.remove('show');
+  NET.rematchMe = false; NET.rematchThem = false;
+  if(NET.isHost){
+    launchOnlineGame();
+  }
+  // Guest will receive a 'startGame' msg and call guestReceiveStart
+}
 function startGame(){
+  document.getElementById('screen-win').classList.remove('show');
   G = mkState();
   G.players[0].pool = [...POOL_TEMPLATE];
   G.players[1].pool = [...POOL_TEMPLATE];
@@ -1303,14 +1440,15 @@ function startGame(){
 
 function backToTitle(){
   stopBgm();
+  // Notify opponent we're leaving (works from win screen or mid-game)
+  if(NET.active) netSend({type:'rematchDecline'});
   document.getElementById('screen-win').classList.remove('show');
   document.getElementById('screen-game').classList.remove('show');
   document.getElementById('screen-lobby').classList.remove('show');
   document.getElementById('online-badge').classList.remove('show');
   document.getElementById('screen-title').style.display='';
   resolving=false; G=null;
-  // Clean up network
-  NET.active=false; NET.isHost=false; NET.myPid=0;
+  NET.active=false; NET.isHost=false; NET.myPid=0; NET.rematchMe=false; NET.rematchThem=false;
   destroyPeer();
 }
 
