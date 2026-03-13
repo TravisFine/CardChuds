@@ -1130,7 +1130,7 @@ async function resolveBoard(){
         const u=G.board[pid][r][c];
         if(!u) continue;
         u.resolved++;
-        if(u.type==='DefCard1'&&u.resolved>=2){ G.players[u.owner].pool.push(u.type); G.board[pid][r][c]=null; }
+        if(u.type==='DefCard1'&&u.resolved>=1){ G.players[u.owner].pool.push(u.type); G.board[pid][r][c]=null; }
       }
 
   cleanDead();
